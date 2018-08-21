@@ -353,26 +353,47 @@ def oneoutzscore(s):
            np.nanstd(cin, axis=0)).reshape((nrow, 1))
     return ooz
 
+def get_handles(ax):
+
+    h = ax.get_children()
+    val = [b._xy for b in h if 'line' in b._label]
+
+def prettybin(s, start_value=50):
+
+    numbins = start_value
+    binned = pd.cut(s, numbins)
+    while np.sum(binned.value_counts().values == 0) > 0:
+        numbins -= 1
+        binned = pd.cut(s, numbins)
+    edges = binned.value_counts().sort_index().index.values
+    return binned
 
 def zscore(s):
     return (s - s.mean()) / s.std()
 
-
 def zscore_modified_asymmetric(s):
-    if s.ndim == 1:
-        s = s[:, None]
-    m = np.median(s)
-    abs_dev = np.abs(s - m)
-    left_mad = np.median(abs_dev[s <= m])
-    right_mad = np.median(abs_dev[s >= m])
-    s_mad = left_mad * np.ones(len(s))
-    s_mad[s > m] = right_mad
+    # if s.ndim == 1:
+        # s = s[:, None]
+    m = s.median()
+    abs_dev = (s - m).abs()
+    lmad = abs_dev[s <= m].median()
+    rmad = abs_dev[s >= m].median()
+    s_mad = lmad * np.ones(len(s))
+    s_mad[s > m] = rmad
     modified_z_score = 0.6745 * abs_dev / s_mad
     modified_z_score[s == m] = 0
     return modified_z_score
+
+
+def to_percent(y, position):
+    return '{0:.0f}%'.format(y*100)
+
 # ---------------------------------------------------------------------
 #   DISPLAY ITEM FUNCTIONS
 # ---------------------------------------------------------------------
+
+
+class Plot:
 
 
 def save_plot(figh=plt.gcf(), bbox='tight', outname='myfig.png', pad=2, tight=True, dpi=300, transparent=False):
@@ -380,14 +401,17 @@ def save_plot(figh=plt.gcf(), bbox='tight', outname='myfig.png', pad=2, tight=Tr
     if tight:
         plt.tight_layout(pad=pad)
 
-    figh.savefig(outname, dpi=dpi, bbox_inches='tight', transparent=transparent)
+    figh.savefig(outname, dpi=dpi, bbox_inches='tight',
+                 transparent=transparent)
     plt.close()
     print('\nFIGURE SAVED TO: ' + outname)
 
 
-def df2md(df, precision=2, tablename='table_name'):
+def df2md(df, precision=2, tablename='table_name', ncol2bold=1):
 
-    dft = df.round(precision).copy()
+    dft = df.reset_index().round(precision).copy()
+    for i in range(ncol2bold):
+        dft.iloc[:, i] = dft.iloc[:, i].apply(lambda x: '**' + x + '**')
     writer = pytablewriter.MarkdownTableWriter()
     writer.header_list = list(dft.columns.values)
     writer.from_dataframe(dft)
@@ -411,6 +435,16 @@ def add_footnote(figh, footnote, pad=-.01):
     t = figh.text(.98, pad, footnote, ha='right', va='bottom',
                   fontsize='x-small', fontstyle='italic', color='#555555')
     return t
+
+
+def format_names(names):
+
+    if isinstance(names, pd.Index):
+        names = list(names)
+    if isinstance(names, str):
+        return names.replace('_', ' ').strip().title()
+    names = [s.replace('_', ' ').strip().title() for s in names]
+    return names
 
 
 def format_ticks(ax):
@@ -512,10 +546,6 @@ def plot_ecdf(s):
     x, y = ecdf(s)
     figh, ax = plt.subplots(figsize=(8, 4))
     plt.plot(x, y, marker='.', linestyle='none', color='#37474F', alpha=0.5)
-
-
-def to_percent(y, position):
-    return '{0:.0f}%'.format(y*100)
 
 
 def plot_hist_stacked(x_list, bins, labels, xl, cumulative=False, as_percent=False, xticks=None):
@@ -770,6 +800,16 @@ def plot_reg(y, x, df, robust=False, x_bins=None, logx=False, x_partial=None, tr
 # ---------------------------------------------------------------------
 #   SUPPORTING FUNCTIONS
 # ---------------------------------------------------------------------
+
+
+def read_csv(fn, cols=None):
+
+    df = pd.read_csv(fn, usecols=cols)
+    df.columns = format_names(df.columns)
+    for col, s in get_cols(df, '_date').iteritems():
+        df[col] = to_dates_lookup(s)
+    return df
+
 
 
 def get_elements(s, idx):
@@ -1271,7 +1311,6 @@ def load_user_windowed_timeseries(df, timewindow=84):
     vday.columns = ['user_id', 'day', 'count']
     uday = vday.groupby('user_id')
     N_USER = len(uday)
-
     def to_daily_timeseries(s):
         utsmat = np.zeros((1, timewindow), dtype=int)
         utsmat[0, s['day']-1] = s['count']
